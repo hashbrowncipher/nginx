@@ -33,6 +33,15 @@ static ngx_conf_bitmask_t  ngx_stream_ssl_protocols[] = {
     { ngx_null_string, 0 }
 };
 
+static ngx_conf_enum_t  ngx_stream_ssl_verify[] = {
+    { ngx_string("off"), 0 },
+    { ngx_string("on"), 1 },
+    { ngx_string("optional"), 2 },
+    { ngx_string("optional_no_ca"), 3 },
+    { ngx_null_string, 0 }
+};
+
+
 
 static ngx_command_t  ngx_stream_ssl_commands[] = {
 
@@ -55,6 +64,34 @@ static ngx_command_t  ngx_stream_ssl_commands[] = {
       ngx_conf_set_str_slot,
       NGX_STREAM_SRV_CONF_OFFSET,
       offsetof(ngx_stream_ssl_conf_t, certificate_key),
+      NULL },
+
+    { ngx_string("ssl_verify_client"),
+      NGX_STREAM_MAIN_CONF|NGX_STREAM_SRV_CONF|NGX_CONF_TAKE1,
+      ngx_conf_set_enum_slot,
+      NGX_STREAM_SRV_CONF_OFFSET,
+      offsetof(ngx_stream_ssl_conf_t, verify),
+      &ngx_stream_ssl_verify },
+
+    { ngx_string("ssl_verify_depth"),
+      NGX_STREAM_MAIN_CONF|NGX_STREAM_SRV_CONF|NGX_CONF_TAKE1,
+      ngx_conf_set_num_slot,
+      NGX_STREAM_SRV_CONF_OFFSET,
+      offsetof(ngx_stream_ssl_conf_t, verify_depth),
+      NULL },
+
+    { ngx_string("ssl_client_certificate"),
+      NGX_STREAM_MAIN_CONF|NGX_STREAM_SRV_CONF|NGX_CONF_TAKE1,
+      ngx_conf_set_str_slot,
+      NGX_STREAM_SRV_CONF_OFFSET,
+      offsetof(ngx_stream_ssl_conf_t, client_certificate),
+      NULL },
+
+    { ngx_string("ssl_trusted_certificate"),
+      NGX_STREAM_MAIN_CONF|NGX_STREAM_SRV_CONF|NGX_CONF_TAKE1,
+      ngx_conf_set_str_slot,
+      NGX_STREAM_SRV_CONF_OFFSET,
+      offsetof(ngx_stream_ssl_conf_t, trusted_certificate),
       NULL },
 
     { ngx_string("ssl_password_file"),
@@ -219,6 +256,12 @@ ngx_stream_ssl_merge_conf(ngx_conf_t *cf, void *parent, void *child)
     ngx_conf_merge_str_value(conf->certificate, prev->certificate, "");
     ngx_conf_merge_str_value(conf->certificate_key, prev->certificate_key, "");
 
+    ngx_conf_merge_uint_value(conf->verify, prev->verify, 0);
+    ngx_conf_merge_uint_value(conf->verify_depth, prev->verify_depth, 1);
+
+    ngx_conf_merge_str_value(conf->client_certificate, prev->client_certificate, "");
+    ngx_conf_merge_str_value(conf->trusted_certificate, prev->trusted_certificate, "");
+
     ngx_conf_merge_ptr_value(conf->passwords, prev->passwords, NULL);
 
     ngx_conf_merge_str_value(conf->dhparam, prev->dhparam, "");
@@ -261,6 +304,32 @@ ngx_stream_ssl_merge_conf(ngx_conf_t *cf, void *parent, void *child)
     {
         return NGX_CONF_ERROR;
     }
+
+    if (conf->verify) {
+
+        if (conf->client_certificate.len == 0 && conf->verify != 3) {
+            ngx_log_error(NGX_LOG_EMERG, cf->log, 0,
+                          "no ssl_client_certificate for ssl_client_verify");
+            return NGX_CONF_ERROR;
+        }
+
+        if (ngx_ssl_client_certificate(cf, &conf->ssl,
+                                       &conf->client_certificate,
+                                       conf->verify_depth)
+            != NGX_OK)
+        {
+            return NGX_CONF_ERROR;
+        }
+    }
+
+    if (ngx_ssl_trusted_certificate(cf, &conf->ssl,
+                                    &conf->trusted_certificate,
+                                    conf->verify_depth)
+        != NGX_OK)
+    {
+        return NGX_CONF_ERROR;
+    }
+
 
     if (SSL_CTX_set_cipher_list(conf->ssl.ctx,
                                 (const char *) conf->ciphers.data)
